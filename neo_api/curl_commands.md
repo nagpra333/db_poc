@@ -1,4 +1,4 @@
-# Graph API - curl Commands
+## Graph API - curl Commands
 
 python -m uvicorn main:app --reload
 
@@ -10,7 +10,7 @@ http://localhost:8000/api/v1
 
 ---
 
-# 1. Create Graph
+### 1. Create Graph
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/graphs
@@ -18,7 +18,7 @@ curl -X POST http://localhost:8000/api/v1/graphs
 
 ---
 
-# 2. Get Graph
+### 2. Get Graph
 
 ```bash
 curl http://localhost:8000/api/v1/graphs/default
@@ -26,7 +26,7 @@ curl http://localhost:8000/api/v1/graphs/default
 
 ---
 
-# 3. Health Check
+### 3. Health Check
 
 ```bash
 curl http://localhost:8000/api/v1/graphs/default/health
@@ -34,7 +34,7 @@ curl http://localhost:8000/api/v1/graphs/default/health
 
 ---
 
-# 4. Create Single Constraint
+### 4. Create Single Constraint
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/graphs/default/schema/constraints -H "Content-Type: application/json" -d '{
@@ -48,7 +48,7 @@ SHOW CONSTRAINTS
 
 ---
 
-# 5. Create Multiple Constraints
+### 5. Create Multiple Constraints
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/graphs/default/schema/constraints/batch -H "Content-Type: application/json" -d '[
@@ -65,7 +65,7 @@ curl -X POST http://localhost:8000/api/v1/graphs/default/schema/constraints/batc
 
 ---
 
-# 6. Get Schema
+### 6. Get Schema
 
 ```bash
 curl http://localhost:8000/api/v1/graphs/default/schema
@@ -73,7 +73,7 @@ curl http://localhost:8000/api/v1/graphs/default/schema
 
 ---
 
-# 7. Create Single Index
+### 7. Create Single Index
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/graphs/default/schema/indexes -H "Content-Type: application/json" -d '{
@@ -84,7 +84,7 @@ curl -X POST http://localhost:8000/api/v1/graphs/default/schema/indexes -H "Cont
 
 ---
 
-# 8. Create Multiple Indexes
+### 8. Create Multiple Indexes
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/graphs/default/schema/indexes/batch -H "Content-Type: application/json" -d '[
@@ -101,7 +101,7 @@ curl -X POST http://localhost:8000/api/v1/graphs/default/schema/indexes/batch -H
 
 ---
 
-# 9. Get Graph Statistics
+### 9. Get Graph Statistics
 
 ```bash
 curl http://localhost:8000/api/v1/graphs/default/stats
@@ -109,7 +109,7 @@ curl http://localhost:8000/api/v1/graphs/default/stats
 
 ---
 
-# 10. Batch Upsert Nodes
+### 10. Batch Upsert Nodes
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/graphs/default/nodes/batch -H "Content-Type: application/json" -d '[
@@ -153,7 +153,7 @@ curl -X POST http://localhost:8000/api/v1/graphs/default/relationships/batch -H 
 
 ---
 
-# 12. Execute Query
+### 12. Execute Query
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/graphs/default/query -H "Content-Type: application/json" -d '{
@@ -163,7 +163,7 @@ curl -X POST http://localhost:8000/api/v1/graphs/default/query -H "Content-Type:
 
 ---
 
-# Execution Order
+### Execution Order
 
 1. Create Graph
 2. Get Graph
