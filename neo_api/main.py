@@ -2,10 +2,46 @@ from fastapi import FastAPI,HTTPException
 from pydantic import BaseModel
 from typing import List
 from graph import GraphAPI
+from graph import Neo4jGraph
 
-app=FastAPI(title="Graph API",version="1.0.0")
+from contextlib import asynccontextmanager
+from graph import (
+    GraphAPI,
+    neo_url,
+    neo_username,
+    neo_password
+)
 
-graphs={}
+graphs = {}
+db_type = "neo"
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    load_graphs()
+    yield
+
+app = FastAPI(
+    title="Graph API",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+def load_graphs():
+    if db_type == "neo":
+        neo = Neo4jGraph(
+            uri=neo_url,
+            user=neo_username,
+            password=neo_password
+        )
+        for db_name in neo.list_databases():
+            graphs[db_name] = GraphAPI(db_name)
+        print("graphs:", graphs)
+        neo.close()
+    elif db_type == "cosmos":
+        print("loading cosmos...")
+
+class CreateGraphRequest(BaseModel):
+    db_name:str
 
 class Constraint(BaseModel):
     label:str
@@ -30,68 +66,71 @@ class Relationship(BaseModel):
     properties:dict={}
 
 class Query(BaseModel):
-    query:str    
+    query:str
 
+class WriteRequest(BaseModel):
+    query: str
+
+
+# Create and initialize a new graph instance
 @app.post("/api/v1/graphs")
-def create_graph():
+def create_graph(request:CreateGraphRequest):
 
-    graph_id="default"
-
-    if graph_id in graphs:
+    db_name = request.db_name
+    if db_name in graphs:
         raise HTTPException(
             status_code=409,
             detail="Graph already exists"
         )
 
-    api=GraphAPI()
+    api = GraphAPI(db_name)
 
     api.create_initialize()
     api.initialize_graph()
 
-    graphs[graph_id]=api
+    graphs[db_name]=api
 
     return{
-        "graphId":graph_id,
+        "graphId":db_name,
         "status":api.get_graph_status()
     }
 
-@app.get("/api/v1/graphs/{graph_id}")
-def get_graph(graph_id:str):
 
-    if graph_id not in graphs:
+# Get status and metadata for a specific graph
+@app.get("/api/v1/graphs/{db_name}")
+def get_graph(db_name:str):
+
+    if db_name not in graphs:
         raise HTTPException(
             status_code=404,
             detail="Graph not found"
         )
 
-    api=graphs[graph_id]
+    return graphs[db_name].get_graph_statistics()
 
-    return{
-        "graphId":graph_id,
-        "status":api.get_graph_status()
-    }
+# Verify connectivity to the underlying graph database. 
+@app.get("/api/v1/graphs/{db_name}/health")
+def health(db_name:str):
 
-@app.get("/api/v1/graphs/{graph_id}/health")
-def health(graph_id:str):
-
-    if graph_id not in graphs:
+    if db_name not in graphs:
         raise HTTPException(
             status_code=404,
             detail="Graph not found"
         )
 
-    return graphs[graph_id].health()
+    return graphs[db_name].health()
 
-@app.post("/api/v1/graphs/{graph_id}/schema/constraints")
-def create_constraint(graph_id:str,constraint:Constraint):
+# Create a unique constraint.
+@app.post("/api/v1/graphs/{db_name}/schema/constraints")
+def create_constraint(db_name:str,constraint:Constraint):
 
-    if graph_id not in graphs:
+    if db_name not in graphs:
         raise HTTPException(
             status_code=404,
             detail="Graph not found"
         )
 
-    graphs[graph_id].create_unique_constraint(
+    graphs[db_name].create_unique_constraint(
         constraint.label,
         constraint.property_key
     )
@@ -100,16 +139,17 @@ def create_constraint(graph_id:str,constraint:Constraint):
         "message":"Constraint created successfully"
     }
 
-@app.post("/api/v1/graphs/{graph_id}/schema/constraints/batch")
-def create_constraints(graph_id:str,constraints:List[Constraint]):
+# Create multiple constraints in one call
+@app.post("/api/v1/graphs/{db_name}/schema/constraints/batch")
+def create_constraints(db_name:str,constraints:List[Constraint]):
 
-    if graph_id not in graphs:
+    if db_name not in graphs:
         raise HTTPException(
             status_code=404,
             detail="Graph not found"
         )
 
-    graphs[graph_id].create_multiple_constraints(
+    graphs[db_name].create_multiple_constraints(
         [
             c.model_dump()
             for c in constraints
@@ -120,27 +160,29 @@ def create_constraints(graph_id:str,constraints:List[Constraint]):
         "message":"Constraints created successfully"
     }
 
-@app.get("/api/v1/graphs/{graph_id}/schema")
-def get_schema(graph_id:str):
+# Retrieve current schema
+@app.get("/api/v1/graphs/{db_name}/schema")
+def get_schema(db_name:str):
 
-    if graph_id not in graphs:
+    if db_name not in graphs:
         raise HTTPException(
             status_code=404,
             detail="Graph not found"
         )
 
-    return graphs[graph_id].get_schema()
+    return graphs[db_name].get_schema()
 
-@app.post("/api/v1/graphs/{graph_id}/schema/indexes")
-def create_index(graph_id:str,index:Index):
+# Create a single index. 
+@app.post("/api/v1/graphs/{db_name}/schema/indexes")
+def create_index(db_name:str,index:Index):
 
-    if graph_id not in graphs:
+    if db_name not in graphs:
         raise HTTPException(
             status_code=404,
             detail="Graph not found"
         )
 
-    graphs[graph_id].create_index(
+    graphs[db_name].create_index(
         index.label,
         index.property_key
     )
@@ -149,16 +191,17 @@ def create_index(graph_id:str,index:Index):
         "message":"Index created successfully"
     }
 
-@app.post("/api/v1/graphs/{graph_id}/schema/indexes/batch")
-def create_indexes(graph_id:str,indexes:List[Index]):
+# Create multiple indexes.
+@app.post("/api/v1/graphs/{db_name}/schema/indexes/batch")
+def create_indexes(db_name:str,indexes:List[Index]):
 
-    if graph_id not in graphs:
+    if db_name not in graphs:
         raise HTTPException(
             status_code=404,
             detail="Graph not found"
         )
 
-    graphs[graph_id].create_multiple_indexes(
+    graphs[db_name].create_multiple_indexes(
         [
             i.model_dump()
             for i in indexes
@@ -169,24 +212,26 @@ def create_indexes(graph_id:str,indexes:List[Index]):
         "message":"Indexes created successfully"
     }
 
-@app.get("/api/v1/graphs/{graph_id}/stats")
-def graph_statistics(graph_id:str):
+# Retrieve graph statistics.
+@app.get("/api/v1/graphs/{db_name}/stats")
+def graph_statistics(db_name:str):
 
-    if graph_id not in graphs:
+    if db_name not in graphs:
         raise HTTPException(
             status_code=404,
             detail="Graph not found"
         )
 
-    return graphs[graph_id].get_graph_statistics()
+    return graphs[db_name].get_graph_statistics()
 
-@app.post("/api/v1/graphs/{graph_id}/nodes/batch")
-def upsert_nodes(graph_id:str,nodes:list[Node]):
+# Batch upsert nodes.
+@app.post("/api/v1/graphs/{db_name}/nodes/batch")
+def upsert_nodes(db_name:str,nodes:list[Node]):
 
-    if graph_id not in graphs:
+    if db_name not in graphs:
         raise HTTPException(status_code=404,detail="Graph not found")
 
-    api=graphs[graph_id]
+    api=graphs[db_name]
 
     for node in nodes:
         api.upsert_node(
@@ -198,13 +243,14 @@ def upsert_nodes(graph_id:str,nodes:list[Node]):
         "message":"Nodes upserted successfully"
     }
 
-@app.post("/api/v1/graphs/{graph_id}/relationships/batch")
-def upsert_relationships(graph_id:str,relationships:list[Relationship]):
+# Batch upsert relationships
+@app.post("/api/v1/graphs/{db_name}/relationships/batch")
+def upsert_relationships(db_name:str,relationships:list[Relationship]):
 
-    if graph_id not in graphs:
+    if db_name not in graphs:
         raise HTTPException(status_code=404,detail="Graph not found")
 
-    api=graphs[graph_id]
+    api=graphs[db_name]
 
     for rel in relationships:
 
@@ -223,12 +269,39 @@ def upsert_relationships(graph_id:str,relationships:list[Relationship]):
         "message":"Relationships upserted successfully"
     }
 
-@app.post("/api/v1/graphs/{graph_id}/query")
-def execute_query(graph_id:str,request:Query):
+# Accepts a free-form graph query (or natural language query) and translates it into the native query language of the underlying graph database (Cypher, Cosmos SQL, Gremlin, etc.) before execution. Returns query results without modifying the graph.
+@app.post("/api/v1/graphs/{db_name}/query")
+def execute_query(db_name:str,request:Query):
 
-    if graph_id not in graphs:
+    if db_name not in graphs:
         raise HTTPException(status_code=404,detail="Graph not found")
 
-    api=graphs[graph_id]
+    api=graphs[db_name]
 
     return api.execute_query(request.query)
+
+# Accepts a parameterized graph write operation or natural language write request, translates it into the appropriate database-specific write query, executes it, and returns execution status along with affected node/relationship counts.
+@app.post("/api/v1/graphs/{db_name}/write")
+def execute_write(db_name: str, request: WriteRequest):
+    if db_name not in graphs:
+        raise HTTPException(
+            status_code=404,
+            detail="Graph not found"
+        )
+
+    api = graphs[db_name]
+
+    return api.execute_natural_language(request.query, "write")
+
+# Accepts a parameterized graph read operation or natural language read request, translates it into the appropriate database-specific read query, executes it, and returns the query results.
+@app.post("/api/v1/graphs/{db_name}/read")
+def execute_read(db_name: str, request: WriteRequest):
+    if db_name not in graphs:
+        raise HTTPException(
+            status_code=404,
+            detail="Graph not found"
+        )
+
+    api = graphs[db_name]
+
+    return api.execute_natural_language(request.query, "read")

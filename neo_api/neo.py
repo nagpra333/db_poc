@@ -2,26 +2,108 @@ from neo4j import GraphDatabase
 import pandas as pd
 import json
 import re
+import time
+from neo4j.exceptions import ClientError
+
+import json
+from openai import AzureOpenAI
+
+from pathlib import Path
+PROMPTS_DIR = Path(__file__).parent / "prompts"
+
+from prompt_loader import load_prompt
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+SYSTEM_PROMPT_TEMPLATE = load_prompt("write_system_prompt.txt")
+# ------------------------------------------
+# Azure OpenAI Configuration
+# ------------------------------------------
+
+AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
+AZURE_OPENAI_KEY = os.getenv("AZURE_OPENAI_KEY")
+AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION")
+AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT")
+neo_url = os.getenv("NEO4J_URI")
+neo_username = os.getenv("NEO4J_USERNAME")
+neo_password = os.getenv("NEO4J_PASSWORD")
+
+def load_prompt(file_name: str) -> str:
+        return (PROMPTS_DIR / file_name).read_text(encoding="utf-8")
+
+def get_system_prompt() -> str:
+    return SYSTEM_PROMPT_TEMPLATE
 
 class Neo4jGraph:
 
     def __init__(self, uri, user, password):
-        self.driver = GraphDatabase.driver(uri, auth = (user, password))
+
+        self.driver = GraphDatabase.driver(
+            uri,
+            auth=(user, password)
+        )
+
+        self.aoai = AzureOpenAI(
+            azure_endpoint=AZURE_OPENAI_ENDPOINT,
+            api_key=AZURE_OPENAI_KEY,
+            api_version=AZURE_OPENAI_API_VERSION
+        )
+
+        self.model = AZURE_OPENAI_DEPLOYMENT
 
     def close(self):
         self.driver.close()
+
+    def list_databases(self):
+        with self.driver.session(database="system") as session:
+            result = session.run("SHOW DATABASES")
+            return [
+                record["name"]
+                for record in result
+                if record["name"] != "system"
+            ]
+
+    # --------------------------------------------------
+    # /api/v1/graphs
+    # --------------------------------------------------
+    def create_database(self,db_name):
+
+        try:
+
+            with self.driver.session(database="system") as session:
+                session.run(f"CREATE DATABASE {db_name} IF NOT EXISTS")
+
+            while True:
+
+                with self.driver.session(database="system") as session:
+
+                    status=session.run(
+                        f"SHOW DATABASE {db_name} YIELD currentStatus RETURN currentStatus"
+                    ).single()
+
+                    if status and status["currentStatus"].lower()=="online":
+                        break
+
+                time.sleep(1)
+
+            print(f"Database '{db_name}' created successfully")
+
+        except ClientError:
+
+            print("Neo4j Community Edition detected. Using default database 'neo4j'.")
 
     # --------------------------------------------------
     # Check Database Connectivity
     # --------------------------------------------------
     def wait_for_db(self, db_name: str):
+        print("Connecting to:", db_name)
         with self.driver.session(database = db_name) as session:
             result = session.run("RETURN 1 AS test")
             print(result.single())
 
-    # --------------------------------------------------
-    # /api/v1/graphs
-    # --------------------------------------------------
+    
     def initialize_graph(self, db_name, sample_data):
         with self.driver.session(database = db_name) as session:
             for node in sample_data.get("nodes", []):
@@ -285,3 +367,79 @@ class Neo4jGraph:
                 dict(record)
                 for record in result
             ]
+    
+    def get_graph_schema_text(self, db_name):
+
+        stats = self.get_graph_statistics(db_name)
+
+        labels = ", ".join(stats["labels"])
+        relationships = ", ".join(stats["relationship_types"])
+
+        return f"""
+    Node Labels:
+    {labels}
+
+    Relationship Types:
+    {relationships}
+    """
+
+    def execute_natural_language_query(self, db_name, user_prompt, operation):
+
+        schema = self.get_graph_schema_text(db_name)
+
+        if operation.lower() == "write":
+            system_prompt = load_prompt("write_system_prompt.txt")
+        else:
+            system_prompt = load_prompt("read_system_prompt.txt")
+
+        system_prompt += "\n\nSchema:\n" + schema
+
+        response = self.aoai.chat.completions.create(
+            model=self.model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": system_prompt
+                },
+                {
+                    "role": "user",
+                    "content": user_prompt
+                }
+            ],
+            response_format={"type": "json_object"}
+        )
+
+        generated = json.loads(
+            response.choices[0].message.content
+        )
+
+        query = generated["query"]
+        parameters = generated.get("parameters", {})
+
+        with self.driver.session(database=db_name) as session:
+
+            result = session.run(query, parameters)
+
+            records = [dict(record) for record in result]
+
+            response_data = {
+                "prompt": user_prompt,
+                "query": query,
+                "parameters": parameters,
+                "records": records
+            }
+
+            if operation.lower() == "write":
+
+                summary = result.consume()
+
+                response_data["counters"] = {
+                    "nodes_created": summary.counters.nodes_created,
+                    "relationships_created": summary.counters.relationships_created,
+                    "properties_set": summary.counters.properties_set,
+                    "labels_added": summary.counters.labels_added
+                }
+
+        return response_data
+
+    
