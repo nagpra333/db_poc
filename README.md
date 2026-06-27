@@ -35,7 +35,7 @@ NEO4J_PASSWORD=password123
 
 #### Graph API - curl Commands
 
-> Replace **kg_db** with any graph name you want to create.
+> Replace **newsampledb** with any graph name you want to create.
 
 ---
 
