@@ -275,7 +275,7 @@ class Neo4jGraph:
         print(f"Output written to {output_csv}")
     
     # --------------------------------------------------
-    # /api/v1/graphs/{id}/schema/indexes
+    # /api/v1/graphs/{db_name}/schema/indexes
     # --------------------------------------------------
 
     def create_index(self, db_name, label, property_key):
@@ -286,7 +286,7 @@ class Neo4jGraph:
         print(f"Index created: {index_name}")
 
     # --------------------------------------------------
-    # /api/v1/graphs/{id}/schema/indexes/batch
+    # /api/v1/graphs/{db_name}/schema/indexes/batch
     # --------------------------------------------------
 
     def create_multiple_indexes(self, db_name, indexes):
@@ -300,7 +300,7 @@ class Neo4jGraph:
                 print(f"Created index: {index_name}")
 
     # --------------------------------------------------
-    # /api/v1/graphs/{id}/schema
+    # /api/v1/graphs/{db_name}/schema
     # --------------------------------------------------
     def get_schema(self, db_name):
         with self.driver.session(database = db_name) as session:
@@ -309,9 +309,8 @@ class Neo4jGraph:
         return {"constraints":constraints, "indexes":indexes}
 
     # --------------------------------------------------
-    # /api/v1/graphs/{id}/stats
+    # /api/v1/graphs/{db_name}/stats
     # --------------------------------------------------
-
     def get_graph_statistics(self, db_name):
         with self.driver.session(database = db_name) as session:
             node_count = session.run("MATCH (n) RETURN count(n) AS cnt").single()["cnt"]
@@ -338,24 +337,50 @@ class Neo4jGraph:
             return {"overall_status": "UNHEALTHY", "message": "Unable to establish database connection.", "error_code": "DB_CONNECTION_FAILED"
 }
     
-    def upsert_node(self, db_name, label,node):
+    def upsert_node(self, db_name, label, node):
         props={k:v for k,v in node.items() if k != "id"}
         with self.driver.session(database=db_name) as session:
-            session.run(f"MERGE (n:{label} {{id:$id}}) SET n += $props",id=node["id"],props=props)
+            record=session.run(
+                f"MERGE (n:{label} {{id:$id}}) SET n += $props RETURN n, labels(n) AS labels",
+                id=node["id"],
+                props=props
+            ).single()
+            return {
+                "label":label,
+                "properties":dict(record["n"]),
+                "labels":record["labels"]
+            }
 
     def upsert_relationship(self, db_name, from_label, from_key, from_value, to_label, to_key, to_value, rel_type, props={}):
         rel_props="{" + ", ".join([f"{k}:${k}" for k in props]) + "}" if props else ""
         with self.driver.session(database = db_name) as session:
-            session.run(
+            record=session.run(
                 f"""
                 MATCH (a:{from_label} {{{from_key}:$from_value}})
                 MATCH (b:{to_label} {{{to_key}:$to_value}})
                 MERGE (a)-[r:{rel_type} {rel_props}]->(b)
+                RETURN a, b, r, type(r) AS rel_type
                 """,
                 from_value = from_value,
                 to_value = to_value,
                 **props
-            )
+            ).single()
+            return {
+                "type":record["rel_type"],
+                "properties":dict(record["r"]),
+                "from":{
+                    "label":from_label,
+                    "key":from_key,
+                    "value":from_value,
+                    "properties":dict(record["a"])
+                },
+                "to":{
+                    "label":to_label,
+                    "key":to_key,
+                    "value":to_value,
+                    "properties":dict(record["b"])
+                }
+            }
 
     def execute_query(self, db_name, query):
 

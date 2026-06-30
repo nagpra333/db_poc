@@ -22,20 +22,6 @@ class GraphAPI:
         print("Using database:", self.db_name)
         self.neo.wait_for_db(self.db_name)
 
-    def get_graph_statistics(self):
-        stats=self.get_graph_statistics()
-        return{
-            "graphId":self.graph_name,
-            "status":self.get_graph_status(),
-            "metadata":{
-                "database":self.db_name,
-                "nodeCount":stats["node_count"],
-                "relationshipCount":stats["relationship_count"],
-                "labels":stats["labels"],
-                "relationshipTypes":stats["relationship_types"]
-            }
-        }
-    
     def initialize_graph(self):
         self.neo.initialize_graph(self.db_name, sample_data)
 
@@ -67,10 +53,10 @@ class GraphAPI:
         return self.neo.health(self.db_name)
 
     def upsert_node(self, label, node):
-        self.neo.upsert_node(self.db_name, label, node)
+        return self.neo.upsert_node(self.db_name, label, node)
 
     def upsert_relationship(self, from_label, from_key, from_value, to_label, to_key, to_value, rel_type, props={}):
-        self.neo.upsert_relationship(self.db_name, from_label, from_key, from_value, to_label, to_key, to_value, rel_type, props)
+        return self.neo.upsert_relationship(self.db_name, from_label, from_key, from_value, to_label, to_key, to_value, rel_type, props)
 
     def execute_query(self,query):
         return self.neo.execute_query(self.db_name, query)    

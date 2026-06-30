@@ -73,7 +73,7 @@ class WriteRequest(BaseModel):
 
 
 # Create and initialize a new graph instance
-@app.post("/api/v1/graphs")
+@app.post("/api/v1/graphs", status_code=201)
 def create_graph(request:CreateGraphRequest):
 
     db_name = request.db_name
@@ -118,10 +118,18 @@ def health(db_name:str):
             detail="Graph not found"
         )
 
-    return graphs[db_name].health()
+    result = graphs[db_name].health()
+
+    if result.get("overall_status") != "HEALTHY":
+        raise HTTPException(
+            status_code=503,
+            detail=result
+        )
+
+    return result
 
 # Create a unique constraint.
-@app.post("/api/v1/graphs/{db_name}/schema/constraints")
+@app.post("/api/v1/graphs/{db_name}/schema/constraints", status_code=201)
 def create_constraint(db_name:str,constraint:Constraint):
 
     if db_name not in graphs:
@@ -140,7 +148,7 @@ def create_constraint(db_name:str,constraint:Constraint):
     }
 
 # Create multiple constraints in one call
-@app.post("/api/v1/graphs/{db_name}/schema/constraints/batch")
+@app.post("/api/v1/graphs/{db_name}/schema/constraints/batch", status_code=201)
 def create_constraints(db_name:str,constraints:List[Constraint]):
 
     if db_name not in graphs:
@@ -173,7 +181,7 @@ def get_schema(db_name:str):
     return graphs[db_name].get_schema()
 
 # Create a single index. 
-@app.post("/api/v1/graphs/{db_name}/schema/indexes")
+@app.post("/api/v1/graphs/{db_name}/schema/indexes", status_code=201)
 def create_index(db_name:str,index:Index):
 
     if db_name not in graphs:
@@ -192,7 +200,7 @@ def create_index(db_name:str,index:Index):
     }
 
 # Create multiple indexes.
-@app.post("/api/v1/graphs/{db_name}/schema/indexes/batch")
+@app.post("/api/v1/graphs/{db_name}/schema/indexes/batch", status_code=201)
 def create_indexes(db_name:str,indexes:List[Index]):
 
     if db_name not in graphs:
@@ -233,14 +241,16 @@ def upsert_nodes(db_name:str,nodes:list[Node]):
 
     api=graphs[db_name]
 
-    for node in nodes:
+    results=[
         api.upsert_node(
             node.label,
             node.properties
         )
+        for node in nodes
+    ]
 
     return{
-        "message":"Nodes upserted successfully"
+        "nodes":results
     }
 
 # Batch upsert relationships
@@ -252,8 +262,7 @@ def upsert_relationships(db_name:str,relationships:list[Relationship]):
 
     api=graphs[db_name]
 
-    for rel in relationships:
-
+    results=[
         api.upsert_relationship(
             rel.from_label,
             rel.from_key,
@@ -264,9 +273,11 @@ def upsert_relationships(db_name:str,relationships:list[Relationship]):
             rel.relationship,
             rel.properties
         )
+        for rel in relationships
+    ]
 
     return{
-        "message":"Relationships upserted successfully"
+        "relationships":results
     }
 
 # Accepts a free-form graph query (or natural language query) and translates it into the native query language of the underlying graph database (Cypher, Cosmos SQL, Gremlin, etc.) before execution. Returns query results without modifying the graph.
