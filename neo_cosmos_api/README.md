@@ -25,12 +25,12 @@ AZURE_OPENAI_DEPLOYMENT=gpt-4o
 NEO4J_URI = bolt://localhost:7687
 NEO4J_USERNAME = neo4j
 NEO4J_PASSWORD = password123
-```
+
 
 #Cosmos
 COSMOS_HOST = https://aiforce-kg-dev.documents.azure.com:443/
 COSMOS_KEY = YOUR_COSMOS_KEY
-
+```
 > **Note**
 >
 > Replace `YOUR_COSMOS_KEY` and `YOUR_AZURE_OPENAI_KEY`. Avoid committing the `.env` file to source control.
