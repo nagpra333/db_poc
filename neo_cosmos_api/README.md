@@ -27,7 +27,7 @@ NEO4J_USERNAME = neo4j
 NEO4J_PASSWORD = password123
 
 
-#Cosmos
+# Cosmos
 COSMOS_HOST = https://aiforce-kg-dev.documents.azure.com:443/
 COSMOS_KEY = YOUR_COSMOS_KEY
 ```
