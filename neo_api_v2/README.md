@@ -11,20 +11,6 @@ node/relationship upserts, read/write queries, stats, and health
 - `llm.py` -- Azure OpenAI client + Cypher generation/validation, used by `/query` and `/write` when a `prompt` is sent instead of raw Cypher
 - `requirements.txt`, `.env.example`
 
-### Natural-language queries and writes
-
-`POST /query` and `POST /write` now also accept a `prompt` field (natural
-language) as an alternative to `name`/`query`. When `prompt` is sent, the
-service builds a schema summary for that graph (`get_schema_context` in
-`neo4j_ops.py`), asks Azure OpenAI (`gpt-4o` by default) to produce Cypher
-grounded in that schema, runs a keyword-level check (`llm.py`) that rejects
-disallowed operations for the mode (e.g. no `CREATE`/`MERGE`/`DELETE` from
-`/query`, no `DROP DATABASE`/`LOAD CSV`/`dbms.*` calls from either), and then
-executes it exactly like a normal `query`/`write` call. The response includes
-an extra `generated_cypher` field so you can see what actually ran -- this is
-additive and outside the original OpenAPI schema, so strict spec validators
-may ignore or reject that field depending on how they're configured.
-
 ## Design note
 
 Neo4j Community Edition only has one database. Rather than requiring
