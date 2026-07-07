@@ -1,0 +1,26 @@
+# Which backend to use: "neo4j" or "gremlin"
+DB_TYPE=gremlin
+
+NEO4J_URI = bolt://localhost:7687
+NEO4J_USERNAME = neo4j
+NEO4J_PASSWORD = password123
+NEO4J_DB = newsampledb
+
+# Azure Cosmos DB Gremlin API (used when DB_TYPE=gremlin)
+# GREMLIN_HOST is just the hostname, no scheme/port -- e.g. my-account.gremlin.cosmos.azure.com
+GREMLIN_HOST = ...
+GREMLIN_DATABASE = kg_db
+GREMLIN_GRAPH = db_poc
+GREMLIN_KEY = ...
+# Must match your container's ACTUAL partition key property (no leading
+# slash), or vertex writes fail with "partition key property has value
+# 'null'". Check: Azure Portal -> Cosmos DB account -> Data Explorer ->
+# your graph -> Scale & Settings -> Partition Key.
+GREMLIN_PARTITION_KEY=pk
+
+# Azure OpenAI -- used to translate a natural-language `prompt` into Cypher
+# for POST /query and POST /write. Only required if you use `prompt`.
+AZURE_OPENAI_ENDPOINT = ...
+AZURE_OPENAI_KEY = ...
+AZURE_OPENAI_API_VERSION = ...
+AZURE_OPENAI_DEPLOYMENT = ...
