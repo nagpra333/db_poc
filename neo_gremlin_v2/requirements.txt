@@ -1,0 +1,10 @@
+fastapi>=0.111
+uvicorn[standard]>=0.30
+python-dotenv>=1.0
+pydantic>=2.6
+openai>=1.30
+
+# Only the driver matching your DB_TYPE is strictly required; both are
+# listed so switching DB_TYPE in .env doesn't also require a reinstall.
+neo4j>=5.20
+gremlinpython
