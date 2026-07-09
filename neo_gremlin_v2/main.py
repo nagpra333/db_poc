@@ -363,6 +363,7 @@ def execute_query(id: str, body: QueryRequest, _=Depends(require_auth)):
         translated = translate_cypher(body.query, body.parameters, schema_context, mode="read")
         result = service.execute_query(id, name=None, query=translated["query"], parameters=translated["parameters"])
         result["translated_query"] = translated["query"]  # extension beyond the base spec, handy for debugging
+        result["translated_parameters"] = translated["parameters"]  # ditto -- lets you see exactly what was bound
         return result
 
     # db_type == neo4j (or a named query): pass through without the LLM.
@@ -393,6 +394,7 @@ def execute_write(id: str, body: WriteRequest, _=Depends(require_auth)):
         translated = translate_cypher(body.query, body.parameters, schema_context, mode="write")
         result = service.execute_write(id, translated["query"], translated["parameters"])
         result["translated_query"] = translated["query"]
+        result["translated_parameters"] = translated["parameters"]
         return result
 
     # db_type == neo4j: pass through without the LLM.

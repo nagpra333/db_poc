@@ -100,24 +100,43 @@ Rules:
 GREMLIN_READ_TRANSLATE_PROMPT = """You are translating a Cypher query (Neo4j) into an equivalent, READ-ONLY
 Gremlin traversal for a graph database (Azure Cosmos DB Gremlin API). The
 Cypher query is the caller's canonical, backend-agnostic query -- your job
-is a faithful semantic translation, not a rewrite or reinterpretation of
-what it asks for.
+is a faithful, literal semantic translation, not a rewrite, enhancement, or
+reinterpretation of what it asks for.
+
+STRICT FIDELITY (read this first):
+- Do NOT add any has()/where() filter, property reference, or condition that
+  is not present in the source Cypher query, other than the single mandatory
+  graph-scope filter described below. If you find yourself adding a filter
+  "to be safe" or "because it seems relevant" -- don't. An unfiltered
+  translation of an unfiltered Cypher query is correct; a translation that
+  narrows the result set beyond what the Cypher asked for is a bug.
+- The number of fields in the Cypher RETURN clause MUST exactly match the
+  number of .by(...) calls in the translated .project(...) chain (or the
+  number of keys in valueMap()/select() if you use those instead). Every
+  RETURN field must appear in the output. Dropping a column is a bug.
+- Do not invent parameter/variable names. Only use a bound variable name in
+  the traversal if it is either (a) one of the Cypher query's own $-prefixed
+  parameters (given below, preserve the same name), or (b) the graph-scope
+  parameter described below. Never introduce a new bound variable name that
+  wasn't given to you.
 
 Rules:
 - Preserve the intent of the Cypher query exactly: same node/edge types
-  filtered, same conditions, same returned fields (using equivalent
-  Gremlin property names from the schema below), same ordering/limits if
-  present.
+  filtered, same conditions (no more, no fewer), same returned fields (using
+  equivalent Gremlin property names from the schema below), same
+  ordering/limits if present.
 - Only use traversal steps that read data: V(), E(), has(), hasLabel(), hasId(),
   out(), in(), both(), outE(), inE(), bothE(), outV(), inV(), where(), and(), or(),
   values(), valueMap(), project()/by(), select(), as(), coalesce() (read-only
   branches only), limit(), order(), group(), groupCount(), count(), path(), dedup().
 - Never use addV(), addE(), property(), drop(), mergeV(), mergeE(), or sideEffect()
   steps that mutate the graph.
-- Always scope the traversal to this graph by starting with
-  g.V().has('graph_id', graph_id) (graph_id is provided as a bound parameter,
-  and is implicit in the source Cypher's graph scoping -- add it even if the
-  Cypher didn't need to express it explicitly).
+- The graph-scoping property name and how to filter by it are given in the
+  schema description below (it varies per deployment -- do not assume any
+  particular literal property name). Always start the traversal with that
+  exact scoping filter, bound to the graph_id parameter, even if the source
+  Cypher didn't need to express it explicitly. Do not hardcode a property
+  name for this filter yourself; use exactly what the schema below specifies.
 - Any Cypher query parameters (the $name placeholders) should be preserved
   as Gremlin bound parameters with the same names wherever possible.
 - Only reference vertex labels, edge labels, and properties that appear in
@@ -133,6 +152,15 @@ Cypher query is the caller's canonical, backend-agnostic query -- your job
 is a faithful semantic translation, not a rewrite or reinterpretation of
 what it asks for.
 
+STRICT FIDELITY (read this first):
+- Do NOT add any has()/where() filter, property write, or condition that is
+  not present in or directly implied by the source Cypher statement, other
+  than the single mandatory graph-scope tag described below.
+- Do not invent parameter/variable names. Only use a bound variable name if
+  it is either (a) one of the Cypher statement's own $-prefixed parameters
+  (preserve the same name), or (b) the graph-scope parameter described
+  below. Never introduce a new bound variable name that wasn't given to you.
+
 Rules:
 - Preserve the intent of the Cypher statement exactly: same
   creates/matches/updates/deletes, translated to Gremlin equivalents
@@ -141,10 +169,13 @@ Rules:
 - You may use addV(), addE(), property(), drop() (only on vertices/edges the
   translated query clearly identifies), as well as the read steps listed for
   the read mode.
-- Always tag any new vertex you create with .property('graph_id', graph_id)
-  so it stays scoped to this graph (graph_id is provided as a bound parameter,
-  and is implicit in the source Cypher's graph scoping -- add it even if the
-  Cypher didn't need to express it explicitly).
+- The graph-scoping property name and how to tag new vertices with it are
+  given in the schema description below (it varies per deployment -- do not
+  assume any particular literal property name). Always tag any new vertex
+  you create with that exact scoping property, bound to the graph_id
+  parameter, even if the source Cypher didn't need to express it explicitly.
+  Do not hardcode a property name for this yourself; use exactly what the
+  schema below specifies.
 - Never use drop() on an unfiltered g.V() or g.E() (i.e. never wipe the whole
   graph), and never call system/management steps.
 - Any Cypher query parameters (the $name placeholders) should be preserved
