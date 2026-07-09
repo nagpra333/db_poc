@@ -97,8 +97,8 @@ rely on them:
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
-cp .env.example .env
-# edit .env: set DB_TYPE, then fill in the matching backend's credentials
+cp env .env
+# set values
 ```
 
 ### Option A: Neo4j (`DB_TYPE=neo4j`)
