@@ -27,7 +27,7 @@ from graph_adapter import (
     GraphNotFoundError,
     NodeReferenceError,
 )
-from llm import CypherGenerationError, LLMConfigError, generate_cypher
+from llm import CypherGenerationError, LLMConfigError, generate_cypher, translate_cypher
 
 load_dotenv()
 
@@ -352,6 +352,20 @@ def execute_query(id: str, body: QueryRequest, _=Depends(require_auth)):
         result = service.execute_query(id, name=None, query=generated["query"], parameters=generated["parameters"])
         result["generated_cypher"] = generated["query"]  # extension beyond the base spec, handy for debugging
         return result
+
+    if body.query and service.query_language != "cypher":
+        # `query` is always written in Cypher (the API's canonical query
+        # language). If db_type == neo4j, the backend already speaks Cypher
+        # natively, so it's passed through without the LLM (see the plain
+        # `return` below). For any other db_type, translate it into that
+        # backend's native language via the LLM before executing.
+        schema_context = service.get_schema_context(id)
+        translated = translate_cypher(body.query, body.parameters, schema_context, mode="read")
+        result = service.execute_query(id, name=None, query=translated["query"], parameters=translated["parameters"])
+        result["translated_query"] = translated["query"]  # extension beyond the base spec, handy for debugging
+        return result
+
+    # db_type == neo4j (or a named query): pass through without the LLM.
     return service.execute_query(id, body.name, body.query, body.parameters)
 
 
@@ -369,6 +383,19 @@ def execute_write(id: str, body: WriteRequest, _=Depends(require_auth)):
         result = service.execute_write(id, generated["query"], generated["parameters"])
         result["generated_cypher"] = generated["query"]
         return result
+
+    if service.query_language != "cypher":
+        # `query` is always written in Cypher. If db_type == neo4j, pass
+        # through without the LLM (see the plain `return` below). For any
+        # other db_type, translate it into that backend's native language
+        # via the LLM before executing.
+        schema_context = service.get_schema_context(id)
+        translated = translate_cypher(body.query, body.parameters, schema_context, mode="write")
+        result = service.execute_write(id, translated["query"], translated["parameters"])
+        result["translated_query"] = translated["query"]
+        return result
+
+    # db_type == neo4j: pass through without the LLM.
     return service.execute_write(id, body.query, body.parameters)
 
 

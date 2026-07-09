@@ -6,6 +6,8 @@ Azure OpenAI. Kept separate from llm.py so wording can be iterated on
 without touching the client/validation code.
 """
 
+import json
+
 READ_SYSTEM_PROMPT = """You are a Cypher query generator for a Neo4j graph database.
 Given a natural-language request and a description of the graph's current schema,
 produce a single READ-ONLY Cypher query that answers the request.
@@ -93,6 +95,77 @@ Rules:
 - Return STRICT JSON only. No markdown fences, no commentary. Exact shape:
   {{"query": "<gremlin traversal starting with g.>", "parameters": {{}}}}
 """
+
+
+GREMLIN_READ_TRANSLATE_PROMPT = """You are translating a Cypher query (Neo4j) into an equivalent, READ-ONLY
+Gremlin traversal for a graph database (Azure Cosmos DB Gremlin API). The
+Cypher query is the caller's canonical, backend-agnostic query -- your job
+is a faithful semantic translation, not a rewrite or reinterpretation of
+what it asks for.
+
+Rules:
+- Preserve the intent of the Cypher query exactly: same node/edge types
+  filtered, same conditions, same returned fields (using equivalent
+  Gremlin property names from the schema below), same ordering/limits if
+  present.
+- Only use traversal steps that read data: V(), E(), has(), hasLabel(), hasId(),
+  out(), in(), both(), outE(), inE(), bothE(), outV(), inV(), where(), and(), or(),
+  values(), valueMap(), project()/by(), select(), as(), coalesce() (read-only
+  branches only), limit(), order(), group(), groupCount(), count(), path(), dedup().
+- Never use addV(), addE(), property(), drop(), mergeV(), mergeE(), or sideEffect()
+  steps that mutate the graph.
+- Always scope the traversal to this graph by starting with
+  g.V().has('graph_id', graph_id) (graph_id is provided as a bound parameter,
+  and is implicit in the source Cypher's graph scoping -- add it even if the
+  Cypher didn't need to express it explicitly).
+- Any Cypher query parameters (the $name placeholders) should be preserved
+  as Gremlin bound parameters with the same names wherever possible.
+- Only reference vertex labels, edge labels, and properties that appear in
+  the schema below. If a Cypher label/property has no direct Gremlin
+  equivalent in the schema, use the closest match rather than inventing one.
+- Return STRICT JSON only. No markdown fences, no commentary. Exact shape:
+  {{"query": "<gremlin traversal starting with g.>", "parameters": {{}}}}
+"""
+
+GREMLIN_WRITE_TRANSLATE_PROMPT = """You are translating a Cypher write statement (Neo4j) into an equivalent
+Gremlin traversal for a graph database (Azure Cosmos DB Gremlin API). The
+Cypher query is the caller's canonical, backend-agnostic query -- your job
+is a faithful semantic translation, not a rewrite or reinterpretation of
+what it asks for.
+
+Rules:
+- Preserve the intent of the Cypher statement exactly: same
+  creates/matches/updates/deletes, translated to Gremlin equivalents
+  (MERGE -> coalesce(find, create) idiom, CREATE -> addV()/addE(), SET ->
+  property(), DELETE/REMOVE -> drop()/properties(...).drop() as appropriate).
+- You may use addV(), addE(), property(), drop() (only on vertices/edges the
+  translated query clearly identifies), as well as the read steps listed for
+  the read mode.
+- Always tag any new vertex you create with .property('graph_id', graph_id)
+  so it stays scoped to this graph (graph_id is provided as a bound parameter,
+  and is implicit in the source Cypher's graph scoping -- add it even if the
+  Cypher didn't need to express it explicitly).
+- Never use drop() on an unfiltered g.V() or g.E() (i.e. never wipe the whole
+  graph), and never call system/management steps.
+- Any Cypher query parameters (the $name placeholders) should be preserved
+  as Gremlin bound parameters with the same names wherever possible.
+- Only reference vertex labels, edge labels, and properties that appear in
+  the schema below, unless the source Cypher is explicitly introducing a new
+  label or property.
+- Return STRICT JSON only. No markdown fences, no commentary. Exact shape:
+  {{"query": "<gremlin traversal starting with g.>", "parameters": {{}}}}
+"""
+
+
+def build_translate_user_message(cypher_query: str, schema_context: str, parameters: dict) -> str:
+    params_note = ""
+    if parameters:
+        params_note = f"\nCypher parameters to preserve as Gremlin bound parameters: {json.dumps(parameters)}"
+    return (
+        f"Graph schema:\n{schema_context}\n"
+        f"{params_note}\n\n"
+        f"Cypher query to translate:\n{cypher_query}"
+    )
 
 
 def build_user_message(natural_language: str, schema_context: str, extra_parameters: dict) -> str:

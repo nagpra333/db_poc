@@ -13,7 +13,12 @@ changes required.
 - `gremlin_ops.py` -- Cosmos DB Gremlin implementation of `GraphAdapter` (`GremlinGraphService`)
 - `main.py` -- FastAPI routes + Pydantic request/response models. Picks a backend at startup via `DB_TYPE`.
 - `prompts.py` -- system prompt text for natural-language-to-query translation (Cypher and Gremlin dialects)
-- `llm.py` -- Azure OpenAI client + query generation/validation, used by `/query` and `/write` when a `prompt` is sent instead of raw query text
+- `llm.py` -- Azure OpenAI client + query generation/validation. Used by
+  `/query` and `/write` in two ways: (1) when the caller sends a `prompt`
+  (natural language) instead of a query, it's generated directly in the
+  active backend's dialect; (2) when the caller sends `query` (always
+  Cypher) against a non-Neo4j backend, it's translated into that backend's
+  dialect. Neo4j backends skip the LLM entirely for `query` bodies.
 - `requirements.txt`, `.env.example`
 
 ## Adapter pattern
@@ -277,7 +282,8 @@ curl -s -X POST "http://localhost:8000/api/v2/graphs/$GRAPH_ID/query" \
 
 ## 12. Execute a freeform read query
 
-If `DB_TYPE=neo4j`, `query` is Cypher:
+`query` is always **Cypher**, regardless of `DB_TYPE` -- it's the API's one
+canonical query language:
 
 ```bash
 curl -s -X POST "http://localhost:8000/api/v2/graphs/$GRAPH_ID/query" \
@@ -288,17 +294,13 @@ curl -s -X POST "http://localhost:8000/api/v2/graphs/$GRAPH_ID/query" \
   }'
 ```
 
-If `DB_TYPE=gremlin`, `query` is a Gremlin traversal (`graph_id` is always
-available as a bound parameter, and every domain vertex carries it):
-
-```bash
-curl -s -X POST "http://localhost:8000/api/v2/graphs/$GRAPH_ID/query" \
-  -H "Authorization: Bearer dev-token" -H "Content-Type: application/json" \
-  -d '{
-    "query": "g.V().has(\"graph_id\", graph_id).hasLabel(\"BusinessRule\").where(__.outE(\"ENFORCED_BY\").inV().has(\"id\", program_id)).project(\"rule_id\",\"rule_name\").by(\"rule_id\").by(\"name\")",
-    "parameters": {"program_id": "PROGRAM::CUSTMGR"}
-  }'
-```
+- If `DB_TYPE=neo4j`, this Cypher is executed as-is (no LLM call).
+- If `DB_TYPE=gremlin`, the Cypher is translated into an equivalent Gremlin
+  traversal by Azure OpenAI before it's executed (`graph_id` is bound
+  automatically, and every domain vertex carries it). The response includes
+  a `translated_query` field with the Gremlin that actually ran, handy for
+  debugging. This adds an LLM round-trip to every `/query`/`/write` call
+  against a Gremlin backend.
 
 ## 13. Execute a parameterized write query
 
