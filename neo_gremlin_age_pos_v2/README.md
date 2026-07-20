@@ -32,19 +32,16 @@ switchable via `DB_TYPE` in `.env` without requiring any code changes.
 
 ## Adapter pattern
 
-                        ┌───────────────┐
-     HTTP request  ───▶ │    main.py    │  depends only on GraphAdapter
-                        └───────┬───────┘
-                                │
-                        ┌───────▼───────┐
-                        │ graph_adapter │  ABC: create_graph, upsert_nodes,
-                        │     .py       │  execute_query, get_schema, ...
-                        └───────┬───────┘
-        ┌───────────────────────┐─────────────────────┬───────────────────────┐
-        ▼                        ▼                     ▼                       ▼
-  Neo4jGraphService          GremlinGraphService      ApacheAgeGraph      PostgresGraph
-  (neo4j_ops.py)             (gremlin_ops.py)         (apache_age_ops)    (postgres_ops.py)
-  DB_TYPE=neo4j              DB_TYPE=gremlin          DB_TYPE=apache_age   DB_TYPE=postgres
+```mermaid
+flowchart TD
+    A["HTTP request"] --> B["main.py<br/><small>depends only on GraphAdapter</small>"]
+    B --> C["graph_adapter.py (ABC)<br/><small>create_graph, upsert_nodes,<br/>execute_query, get_schema, ...</small>"]
+    C --> D["Neo4jGraphService<br/><small>neo4j_ops.py</small><br/><b>DB_TYPE=neo4j</b>"]
+    C --> E["GremlinGraphService<br/><small>gremlin_ops.py</small><br/><b>DB_TYPE=gremlin</b>"]
+    C --> F["ApacheAgeGraph<br/><small>apache_age_ops.py</small><br/><b>DB_TYPE=apache_age</b>"]
+    C --> G["PostgresGraph<br/><small>postgres_ops.py</small><br/><b>DB_TYPE=postgres</b>"]
+```
+
 
 `main.py` calls a small factory (`_build_service()`) at startup that
 reads `DB_TYPE` and lazily imports + constructs the matching class. Only
