@@ -9,6 +9,37 @@ Prompt text for:
 
 import json
 
+COSMOS_GREMLIN_DIALECT_RULES = """
+TARGET ENGINE: Azure Cosmos DB for Apache Gremlin.
+Cosmos implements only a subset of TinkerPop. The following WILL fail to compile:
+
+- Groovy closures / lambdas of any kind: .map{...}, .by{...}, .filter{...}.
+  Never emit a '{' or '}' anywhere in the traversal.
+- The filter() step. Use has(), where(), and not() instead.
+- The match() step. Express the pattern with chained traversal steps.
+- mergeV() and mergeE() (Gremlin 3.6+). Use the
+  fold().coalesce(unfold(), addV(...)) idiom instead.
+- program(), subgraph(), sack(), branch(), io(), and the OLAP steps
+  (connectedComponent, shortestPath, pageRank, peerPressure).
+- Gremlin Bytecode / fluent API. The traversal is submitted as a text string.
+
+Other Cosmos constraints:
+- Property values must be primitives (string, number, boolean) or arrays of
+  primitives. No nested objects, no nulls.
+- The traversal must start with 'g.'.
+
+BINDING RULES (violations here silently corrupt data -- read carefully):
+- Every bare identifier in the traversal that is not a Gremlin step or enum
+  token MUST appear as a key in the "parameters" object you return.
+- In particular, a bare identifier in the second position of has('key', x) or
+  property('key', x) is a VARIABLE. If you write property('id', id) you must
+  return "id" in parameters. Do not rely on 'id' being resolved by the engine:
+  it is not, and the traversal will write the literal string "id" instead.
+- If you cannot supply a real value for a variable, do not invent one and do
+  not emit the traversal -- the source Cypher did not have the information.
+- Quote all string literals with single quotes.
+"""
+
 READ_SYSTEM_PROMPT = """You are a Cypher query generator for a Neo4j graph database.
 Given a natural-language request and a description of the graph's current schema,
 produce a single READ-ONLY Cypher query that answers the request.
@@ -55,6 +86,7 @@ Rules:
 - Never use addV(), addE(), property(), drop(), mergeV(), mergeE(), or sideEffect().
 - Always scope the traversal to the graph exactly as described in schema context.
 - Only reference labels, edge types, and properties that appear in the schema.
+""" + COSMOS_GREMLIN_DIALECT_RULES + """
 - Return STRICT JSON only. Exact shape:
   {"query": "<gremlin traversal starting with g.>", "parameters": {}}
 """
@@ -67,6 +99,7 @@ Rules:
 - Prefer idempotent write patterns unless the request clearly wants non-idempotent behavior.
 - Tag new vertices exactly as described by the schema context.
 - Never wipe the whole graph.
+""" + COSMOS_GREMLIN_DIALECT_RULES + """
 - Return STRICT JSON only. Exact shape:
   {"query": "<gremlin traversal starting with g.>", "parameters": {}}
 """
@@ -99,6 +132,7 @@ Rules:
   {"query": "<postgres sql>", "parameters": {}}
 """
 
+
 GREMLIN_READ_TRANSLATE_PROMPT = """You are translating a Cypher query into an equivalent READ-ONLY
 Gremlin traversal.
 
@@ -106,6 +140,7 @@ STRICT FIDELITY:
 - Do not add filters, properties, or bound variables not present in the source Cypher,
   except the mandatory graph scope filter described in the schema context.
 - Preserve Cypher RETURN columns exactly.
+""" + COSMOS_GREMLIN_DIALECT_RULES + """
 - Return STRICT JSON only. Exact shape:
   {"query": "<gremlin traversal>", "parameters": {}}
 """
@@ -117,6 +152,15 @@ STRICT FIDELITY:
 - Do not add extra writes or conditions beyond the source Cypher, except the mandatory
   graph scope rules described in the schema context.
 - Preserve caller parameter names.
+- The source statement will always be a DATA write (CREATE / MERGE / SET / DELETE).
+  Schema DDL is never sent to you; if you somehow receive CREATE CONSTRAINT or
+  CREATE INDEX, return {"query": "", "parameters": {}} rather than inventing a
+  traversal. Gremlin has no schema DDL and a guessed traversal writes junk data.
+- For an idempotent node upsert, use exactly this shape:
+  g.V().has('<pk>', graph_id).hasLabel('<Label>').has('id', <bound_var>)
+   .fold()
+   .coalesce(unfold(), addV('<Label>').property('<pk>', graph_id).property('id', <bound_var>))
+""" + COSMOS_GREMLIN_DIALECT_RULES + """
 - Return STRICT JSON only. Exact shape:
   {"query": "<gremlin traversal>", "parameters": {}}
 """

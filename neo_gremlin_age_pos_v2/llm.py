@@ -94,6 +94,14 @@ _SQL_INVALID_WITH_LITERAL_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Neo4j schema DDL. Not translatable to any other backend -- see translate_cypher.
+_CYPHER_DDL_RE = re.compile(
+    r"""^\s*(?:CREATE|DROP)\s+
+        (?:CONSTRAINT
+          |(?:TEXT|RANGE|POINT|FULLTEXT|LOOKUP|VECTOR)?\s*INDEX)\b""",
+    re.IGNORECASE | re.VERBOSE,
+)
+
 _FORBIDDEN_PATTERNS = {
     ("cypher", "read"): _CYPHER_READ_FORBIDDEN,
     ("cypher", "write"): _CYPHER_WRITE_FORBIDDEN,
@@ -119,9 +127,24 @@ _TRANSLATE_PROMPTS = {
     ("sql", "write"): POSTGRES_WRITE_TRANSLATE_PROMPT,
 }
 
-_BOUND_VAR_REF_RE = re.compile(
-    r"\.(?:has|hasId|hasLabel|by|where|is)\s*\(\s*(?:'[^']*'\s*,\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\)"
+# Two-argument form -- .has('key', var) / .property('key', var). The second
+# argument is ALWAYS a value, so a bare identifier there is always a variable
+# reference, never a Gremlin enum token. This must include .property(...):
+# the previous regex omitted it, which is how
+#   addV('Program').property('id', id)
+# slipped through with `id` unbound and wrote a junk vertex.
+_TWO_ARG_VAR_REF_RE = re.compile(
+    r"\.(?:has|hasNot|property|by|where|is|constant|option)\s*\(\s*"
+    r"'[^']*'\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)"
 )
+
+# Single-argument form -- .by(id), .hasLabel(x). Here a bare identifier may
+# legitimately be a Gremlin token (T.id, label, asc...), so filter those out.
+_ONE_ARG_VAR_REF_RE = re.compile(
+    r"\.(?:has|hasId|hasLabel|by|where|is|constant)\s*\(\s*"
+    r"([A-Za-z_][A-Za-z0-9_]*)\s*\)"
+)
+
 _GREMLIN_NON_VAR_TOKENS = frozenset(
     {
         "label", "id", "T", "Order", "Column", "Scope", "Pop", "gt", "gte",
@@ -129,12 +152,25 @@ _GREMLIN_NON_VAR_TOKENS = frozenset(
     }
 )
 
+# Cosmos DB implements a subset of the TinkerPop surface. Catching these here
+# turns an opaque 597 GraphCompileException from Azure into a 400 from us,
+# with the offending traversal in the message.
+_COSMOS_UNSUPPORTED_STEP_RE = re.compile(
+    r"\.(?:filter|match|mergeV|mergeE|program|subgraph|sack|branch|io|"
+    r"connectedComponent|shortestPath|pageRank|peerPressure)\s*\(",
+    re.IGNORECASE,
+)
+# Groovy closures/lambdas: map{...}, by{...}, filter{...} are all rejected.
+_GREMLIN_LAMBDA_RE = re.compile(r"\{[^}]*\}")
+
 
 def _extract_referenced_vars(query_text: str) -> set[str]:
-    return {
-        m for m in _BOUND_VAR_REF_RE.findall(query_text)
+    two_arg = set(_TWO_ARG_VAR_REF_RE.findall(query_text))
+    one_arg = {
+        m for m in _ONE_ARG_VAR_REF_RE.findall(query_text)
         if m not in _GREMLIN_NON_VAR_TOKENS
     }
+    return two_arg | one_arg
 
 
 def _count_cypher_return_fields(cypher_query: str) -> Optional[int]:
@@ -207,6 +243,32 @@ def _validate(query_text: str, dialect: str, mode: str) -> None:
         )
     if dialect == "sql":
         _validate_postgres_sql_shape(query_text, mode)
+    if dialect == "gremlin":
+        _validate_gremlin_shape(query_text)
+
+
+def _validate_gremlin_shape(query_text: str) -> None:
+    """Reject traversals that Cosmos DB's Gremlin engine cannot compile,
+    before we pay a round trip and get back an opaque GraphCompileException."""
+    if not query_text.lstrip().startswith("g."):
+        raise CypherGenerationError(
+            f"Generated Gremlin traversal must start with 'g.'. "
+            f"Rejected query: {query_text}"
+        )
+    lambda_match = _GREMLIN_LAMBDA_RE.search(query_text)
+    if lambda_match:
+        raise CypherGenerationError(
+            "Generated Gremlin uses a Groovy closure/lambda, which Cosmos DB does "
+            f"not support (matched: {lambda_match.group(0)!r}). "
+            f"Rejected query: {query_text}"
+        )
+    step_match = _COSMOS_UNSUPPORTED_STEP_RE.search(query_text)
+    if step_match:
+        raise CypherGenerationError(
+            f"Generated Gremlin uses step {step_match.group(0)!r}, which is not in the "
+            f"subset of TinkerPop supported by Cosmos DB. "
+            f"Rejected query: {query_text}"
+        )
 
 
 def _validate_postgres_sql_shape(query_text: str, mode: str) -> None:
@@ -292,6 +354,16 @@ def translate_cypher(
     if (target_dialect, mode) not in _TRANSLATE_PROMPTS:
         raise CypherGenerationError(
             f"Unsupported translation target/mode: {target_dialect}/{mode}"
+        )
+    # Defence in depth: main.py intercepts schema DDL before it gets here, but
+    # if anything else calls this function we refuse rather than let the model
+    # invent a data write in place of a constraint.
+    if _CYPHER_DDL_RE.match(cypher_query or ""):
+        raise CypherGenerationError(
+            "Cypher schema DDL (CREATE/DROP CONSTRAINT or INDEX) has no equivalent "
+            f"in {target_dialect} and will not be translated. Use the adapter's "
+            "create_constraints() / create_indexes() schema API instead. "
+            f"Rejected statement: {cypher_query.strip()}"
         )
     system_prompt = _TRANSLATE_PROMPTS[(target_dialect, mode)]
     user_message = build_translate_user_message(cypher_query, schema_context, parameters or {})
